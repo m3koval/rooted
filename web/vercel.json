@@ -4,6 +4,8 @@
   "outputDirectory": "dist",
   "installCommand": "npm ci",
   "rewrites": [
+    {"source": "/display", "destination": "/display.html"},
+    {"source": "/display/", "destination": "/display.html"},
     {"source": "/leaders", "destination": "/leaders.html"},
     {"source": "/leaders/", "destination": "/leaders.html"},
     {"source": "/checkin", "destination": "/kiosk.html"},
