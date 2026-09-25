@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#15251e"><title>Rooted · Check in</title>
+<link rel="stylesheet" href="/kiosk.css">
+</head>
+<body>
+<div class="layout">
+<aside class="identity"><div class="wordmark">rooted<span>.</span></div><div><p class="real">Real Faith.<br>Real Life.<br><em>Real Fruit.</em></p><p class="eyebrow">GROW DEEP. LIVE REAL.</p></div></aside>
+<main>
+<header><span id="event-label">Rooted · Shared check-in</span><div class="station-actions"><button id="lock" class="link" hidden>Lock station</button><button id="forget" class="link" hidden>Forget station</button></div></header>
+<div id="status" role="status" aria-live="polite"></div>
+<section id="activation">
+<svg class="sprout" viewBox="0 0 80 80" aria-hidden="true"><path d="M40 70C40 39 49 18 72 12C74 39 62 49 44 49M40 66C39 46 18 50 10 24C32 22 43 32 40 51" fill="currentColor"/></svg><h1>Open check-in</h1>
+<p class="support">Enter your leader PIN.</p>
+<p id="leader-warning" class="notice" hidden>A leader is signed in to this browser. Use a separate, dedicated browser profile for this shared station. Leader accounts must never be shared.</p>
+<form id="pair-form" autocomplete="off"><label for="token">One-time station setup code</label><input id="token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" required><button class="primary" type="submit">Remember this station →</button><p class="small">Paste the station code once on this trusted device. Not a leader password or Supabase key.</p></form>
+<form id="activate-form" autocomplete="off" hidden><label for="pin">Leader PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="••••••" required aria-describedby="pin-help"><p id="pin-help" class="small">Enter your six-digit leader PIN to unlock check-in. Your PIN is never saved.</p><button class="primary" type="submit">Unlock station →</button></form>
+<p class="small">Locks after 15 minutes without activity. Check-in answers clear between people. This station never opens a leader account.</p>
+</section>
+<section id="search-screen" hidden><p class="eyebrow">WELCOME TO ROOTED</p><h1>Find your name.</h1><p class="support">Type at least two letters of your name.</p>
+<form id="search-form"><label for="query">Your name</label><input id="query" type="search" maxlength="80" autocomplete="off" required><button class="primary">Find my name →</button></form><div id="matches"></div><p id="search-note" class="small"></p><p class="support">First time here, or can't find your name? Ask a leader to help you check in.</p></section>
+<section id="person-screen" hidden><p class="eyebrow">YOUR CHECK-IN</p><h1 id="person-name"></h1><p id="person-note" class="support"></p>
+<form id="checkin-form"><fieldset id="answers"><label class="checkbox"><input id="bible" type="checkbox"> I brought my Bible</label><label for="chapters">Total chapters read this week</label><p id="week" class="small"></p><input id="chapters" type="number" min="0" max="100000" step="1" value="0" required><p class="small">Enter your total for the week, not just new chapters. Previously credited chapters won't earn points again.</p></fieldset><button id="submit-checkin" class="primary">Confirm check-in →</button></form>
+<button id="back" class="link">That's not me · Go back</button></section>
+<section id="pending-screen" hidden><p class="eyebrow">AWAITING SERVER RECEIPT</p><h1>Let's make sure.</h1><p class="support">This check-in may already be saved. Retry the exact same request to confirm it. Do not check in again on another device; ask a leader if this cannot be resolved.</p><button id="retry" class="primary">Retry same check-in →</button><p id="pending-id" class="small"></p></section>
+<section id="receipt-screen" hidden><p class="eyebrow">SERVER-CONFIRMED CHECK-IN</p><h1>You're here.<br>Let's grow.</h1><p id="receipt-note" class="support"></p><p class="earned"><strong id="points"></strong> points earned</p><ul id="components"></ul><p id="receipt-id" class="small"></p><button id="next" class="primary">Done · Next person →</button></section>
+<footer>Check-in only · Need help? Ask a leader.<br>Online confirmation is required. Nothing is awarded offline.</footer>
+</main></div><script type="module" src="/kiosk.js"></script>
+</body></html>

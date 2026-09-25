@@ -16,3 +16,7 @@ supabase/.temp/
 *session*.json
 playwright-report/
 test-results/
+# Generated SQL verification output; canonical tests remain tracked.
+tests/sql/rollback.sql
+tests/sql/rollback-output.json
+tests/sql/rollback-stderr.txt

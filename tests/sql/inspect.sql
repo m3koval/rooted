@@ -1,0 +1,1 @@
+select current_database(), current_user, to_regnamespace('rooted') is not null as rooted_installed, to_regclass('supabase_migrations.schema_migrations') is not null as migration_ledger_exists, (select n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace where e.extname='pgcrypto') as crypto_schema;

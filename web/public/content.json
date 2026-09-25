@@ -1,0 +1,5 @@
+{
+  "_editorNote": "PUBLIC FILE: Never add participant names, birthdays, contacts, attendance or points. Add only verified public events using title, date (YYYY-MM-DD), time, location, description and published: true. Past events are hidden. The verified KJV quote and its source are fixed in public-content.js; reflection is editorial, not Scripture.",
+  "events": [],
+  "reflection": "Faith grows beyond what we hear. This week, choose one small way to live what you are learning: offer help, listen with patience, or encourage someone who needs it. Real growth begins with a faithful next step."
+}

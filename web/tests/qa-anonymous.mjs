@@ -1,0 +1,37 @@
+import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+const origin=process.env.ROOTED_QA_ORIGIN||'http://127.0.0.1:5178';
+const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
+const out=process.env.ROOTED_QA_OUTPUT||'/home/helper/.local/share/rooted-private/qa';
+await fs.mkdir(out,{recursive:true});
+let checks=0;
+const ok=(value,msg)=>{assert.ok(value,msg);checks++;};
+try{
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const page=await context.newPage();
+  let privateRequests=0;const errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  context.on('request',r=>{if(r.url().includes('supabase.co'))privateRequests++;});
+  await page.goto(origin+'/',{waitUntil:'networkidle'});
+  ok((await page.title()).toLowerCase().includes('rooted'),'public page title');
+  ok(privateRequests===0,'public page makes zero Supabase requests');
+  ok(await page.locator('input[type=password]').count()===0,'public page not leader login');
+  ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'public mobile no horizontal overflow');
+  await page.screenshot({path:out+'/public-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1024,height:768});
+  await page.screenshot({path:out+'/public-ipad.png',fullPage:true});
+  await page.goto(origin+'/leaders.html',{waitUntil:'networkidle'});
+  ok(await page.locator('input[type=password]').count()===1,'signed-out leader login');
+  ok(!(await page.locator('body').innerText()).includes('QA CHILD SENTINEL'),'no private roster signed out');
+  await page.screenshot({path:out+'/leader-login.png',fullPage:true});
+  await page.goto(origin+'/kiosk.html',{waitUntil:'networkidle'});
+  ok(!(await page.locator('body').innerText()).includes('QA CHILD SENTINEL'),'no kiosk data before authorization');
+  ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'kiosk tablet no overflow');
+  await page.setViewportSize({width:390,height:844});
+  ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'kiosk mobile no overflow');
+  await page.screenshot({path:out+'/kiosk-locked-mobile.png',fullPage:true});
+  ok(errors.length===0,'no browser JS errors: '+errors.join(';'));
+  await context.close();
+  console.log(JSON.stringify({passed:checks,mode:'anonymous real local app',output:out}));
+}finally{await browser.close();}
