@@ -9,7 +9,7 @@ export function sanitizeContent(raw, today = new Date().toISOString().slice(0, 1
     const parsed = new Date(event.date + 'T12:00:00Z');
     if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== event.date || event.date < today) return [];
     const title = plain(event.title, 100);
-    return title ? [{title, date: event.date, time: plain(event.time, 60), location: plain(event.location, 160), description: plain(event.description)}] : [];
+    return title ? [{title, date: event.date, time: plain(event.time, 60), location: plain(event.location, 160), description: plain(event.description), ...(plain(event.mapAddress, 160) ? {mapAddress: plain(event.mapAddress, 160)} : {})}] : [];
   }).sort((a, b) => a.date.localeCompare(b.date));
   return {events, reflection: plain(data.reflection, 800) || 'Where could you put faith into practice today? Look for one small way to serve, encourage, or listen. Start there.', verse: KJV_VERSE, source: VERSE_SOURCE};
 }

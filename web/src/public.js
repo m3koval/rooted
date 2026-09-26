@@ -13,7 +13,18 @@ async function loadPublicContent() {
       const date = document.createElement('time'); date.dateTime = event.date;
       date.textContent = new Intl.DateTimeFormat('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:'UTC'}).format(new Date(event.date+'T12:00:00Z'));
       const title = document.createElement('h3'); title.textContent = event.title;
-      const details = document.createElement('p'); details.textContent = [event.time, event.location].filter(Boolean).join(' · ');
+      const details = document.createElement('p'); details.textContent = event.time;
+      if (event.location) {
+        if (event.time) details.append(' · ');
+        if (event.mapAddress) {
+          const link = document.createElement('a');
+          link.textContent = event.location;
+          link.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(event.mapAddress);
+          link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.setAttribute('aria-label', event.location + ' — open in Google Maps');
+          details.append(link);
+        } else details.append(event.location);
+      }
       const description = document.createElement('p'); description.textContent = event.description;
       card.append(date, title, details, description); return card;
     });
