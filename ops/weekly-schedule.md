@@ -1,0 +1,13 @@
+# Private weekly gathering operations
+
+Owner-confirmed rule: each Friday within an enabled active season **except the last Friday of every month**. Third Fridays are included. The rule is prospective: the September 25, 2026 gathering and its saved attendance and ledger are historical records, not a lesson to remove.
+
+Migration 20260928000400 is schema-only. After a fresh backup, rollback rehearsal and migration-ledger check, apply it to the approved project `sfrkowqljeaztupywtzy`, then separately run `activate-weekly-production.sql`. That operation guards the approved season and bounds, enables its private schedule and installs a stable named pg_cron job every five minutes. Read back the job and a successful scheduled execution; manual invocation is not cron proof.
+
+Generation is bounded by the season and current Eastern date, idempotent by existing season/date, and never reopens a manually closed row. Extra exclusions live in an ungranted private table; no public homepage content is generated. Last Fridays require no hand-maintained exception rows. Future seasons must be explicitly enabled.
+
+New check-ins and device authority stop exactly at midnight America/New_York, independently of maintenance timing. Stored `open` flags and session system-revocation flags converge within five minutes. Saved check-in corrections stay available through the existing authorized correction RPC. No automated points or attendance rewriting is performed.
+
+A remembered station rolls only after a valid active leader PIN, to a unique eligible current-date gathering in the same active season. On skipped Fridays there is no current gathering; enrollment remains paired. Wrong PINs, ambiguity, out-of-season dates and explicitly excluded dates cannot retarget it. Even a manually added excluded-date event cannot issue current device authority in an enabled weekly season. Old sessions are revoked; queued check-ins retain their original event and request IDs and fail closed rather than moving to a new date. Refresh older kiosk clients before use because the server now requires an explicit event fence.
+
+Release verification: compare the full expected date array against actual rows, check no future last Fridays, retain the Sep25 event ID and all non-lifecycle fields, fingerprint check-ins and ledger before/after, verify private helper/table ACLs and service-role-only kiosk entry, and prove a successful cron run. Test four- and five-Friday months, season bounds, DST, idempotency, manual closure, closed saved corrections, wrong PINs, rollover and stale intent denial on disposable fixtures. Never add synthetic participants to production.

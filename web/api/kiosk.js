@@ -20,7 +20,7 @@ export function validateBody(body) {
   const valid = body.action === 'context' ? keys(p, [])
     : body.action === 'search' ? keys(p, ['query']) && text(p.query, 80) && !/[\u0000-\u001f\u007f]/.test(p.query)
     : body.action === 'person' ? keys(p, ['participant_id']) && uuid(p.participant_id)
-    : keys(p, ['participant_id', 'bible', 'chapters']) && uuid(p.participant_id) && typeof p.bible === 'boolean' && integer(p.chapters) && uuid(body.request_id);
+    : keys(p, ['event_id', 'participant_id', 'bible', 'chapters']) && uuid(p.event_id) && uuid(p.participant_id) && typeof p.bible === 'boolean' && integer(p.chapters) && uuid(body.request_id);
   if (!valid) throw error(400, 'invalid_request');
   return { p_action: body.action, p_payload: p, p_request_id: mutation ? body.request_id : null };
 }
