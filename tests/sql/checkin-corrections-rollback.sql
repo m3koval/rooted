@@ -1,0 +1,128 @@
+-- Local disposable database only; fictional fixtures roll back.
+\set ON_ERROR_STOP on
+begin;
+do $$
+declare a uuid:=gen_random_uuid(); outsider uuid:=gen_random_uuid();
+ p uuid:=gen_random_uuid(); q uuid:=gen_random_uuid(); guest uuid:=gen_random_uuid(); inviter uuid:=gen_random_uuid();
+ s uuid:=gen_random_uuid(); e uuid:=gen_random_uuid(); e2 uuid:=gen_random_uuid(); e3 uuid:=gen_random_uuid();
+ c uuid; c2 uuid; later uuid; gc uuid; req uuid:=gen_random_uuid(); rev uuid; r jsonb; original jsonb; replay jsonb; v jsonb;
+ token text:=repeat('b',64); station uuid; dev uuid;
+begin
+ insert into auth.users(id,email) values(a,'full-checkin@example.invalid'),(outsider,'outside@example.invalid');
+ insert into rooted.leaders(user_id,display_name,role) values(a,'Full edit leader','leader');
+ insert into rooted.participants(id,name,previously_attended) values(p,'Correction source',true),(q,'Correction destination',true),(guest,'New guest',false),(inviter,'Inviter',true);
+ insert into rooted.seasons(id,name,starts_on,ends_on) values(s,'Correction test','2026-01-01','2026-12-31');
+ insert into rooted.events(id,season_id,name,date,reading_week) values(e,s,'Correction 1','2026-09-28','2026-09-28'),(e2,s,'Correction 2','2026-09-29','2026-09-28'),(e3,s,'Correction 3','2026-09-30','2026-09-28');
+ perform set_config('request.jwt.claim.sub',a::text,true);
+ execute 'set local role authenticated';
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'checkin',jsonb_build_object('participant_id',p,'event_id',e,'attended',true,'bible',true,'chapters',20)); c:=(r#>>'{result,receipt,checkin_id}')::uuid;
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'checkin',jsonb_build_object('participant_id',p,'event_id',e2,'attended',true,'bible',false,'chapters',12)); c2:=(r#>>'{result,receipt,checkin_id}')::uuid;
+ perform public.rooted_leader_mutate(gen_random_uuid(),'adjustment',jsonb_build_object('participant_id',p,'event_id',e,'points',-3,'reason','Unrelated manual adjustment'));
+ execute 'reset role';
+ select to_jsonb(x) into original from rooted.checkins x where id=c;
+ update rooted.rates set attendance=19,bible=13;
+ execute 'set local role authenticated';
+ r:=public.rooted_correct_checkin(req,c,null,q,true,true,5); rev:=(r#>>'{result,revision_id}')::uuid;
+ assert r=public.rooted_correct_checkin(req,c,null,q,true,true,5),'exact retry';
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,6); raise exception 'bad retry'; exception when unique_violation then null; end;
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),c,null,q,true,true,5); raise exception 'stale'; exception when serialization_failure then null; end;
+ execute 'reset role';
+ assert (select to_jsonb(x) from rooted.checkins x where id=c)=original,'original preserved';
+ assert (select sum(points) from rooted.ledger where participant_id=p and kind in ('attendance','attendance_correction','bible','bible_correction'))=5,'source only other-event attendance';
+ assert (select sum(points) from rooted.ledger where participant_id=q and kind in ('attendance','attendance_correction','bible','bible_correction'))=7,'historical rates preserved after transfer';
+ assert (select sum(points) from rooted.ledger where participant_id=p and kind in ('reading','reading_correction'))=12,'source weekly max restored';
+ assert (select sum(points) from rooted.ledger where participant_id=q and kind in ('reading','reading_correction'))=5,'destination weekly reading';
+ assert (select sum(points) from rooted.ledger where participant_id=p and kind='adjustment')=-3;
+ assert (select checkin_id from rooted.effective_first_visits where participant_id=p)=c2;
+ assert (select checkin_id from rooted.effective_first_visits where participant_id=q)=c;
+ execute 'set local role authenticated';
+ -- Transfer back is reversible, then away again permits a genuine later source visit.
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,p,true,true,20); rev:=(r#>>'{result,revision_id}')::uuid;
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,true,true,5); rev:=(r#>>'{result,revision_id}')::uuid;
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'checkin',jsonb_build_object('participant_id',p,'event_id',e,'attended',true,'bible',false,'chapters',15)); later:=(r#>>'{result,receipt,checkin_id}')::uuid;
+ assert later<>c,'genuine later source checkin';
+ assert (r#>>'{result,receipt,earned_points}')::integer=22,'new attendance 19 plus max delta 3';
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),c,rev,p,true,true,20); raise exception 'destination duplicate'; exception when unique_violation then null; end;
+ -- Absent removes own chapters; historical rates restore upon re-attendance.
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,false,false,0); rev:=(r#>>'{result,revision_id}')::uuid;
+ execute 'reset role';
+ assert (select sum(points) from rooted.ledger where participant_id=q)=0,'absent earns no check-in credit';
+ assert not exists(select 1 from rooted.effective_first_visits where participant_id=q);
+ execute 'set local role authenticated';
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,false,true,8); raise exception 'invalid bible'; exception when invalid_parameter_value then null; end;
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,true,true,-1); raise exception 'negative'; exception when invalid_parameter_value then null; end;
+ begin perform public.rooted_correct_chapters(gen_random_uuid(),c,8,9); raise exception 'legacy bypass'; exception when object_not_in_prerequisite_state then null; end;
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,true,true,8); rev:=(r#>>'{result,revision_id}')::uuid;
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,true,true,9); rev:=(r#>>'{result,revision_id}')::uuid;
+ v:=public.rooted_leader_state('checkins');
+ assert exists(select 1 from jsonb_array_elements(v->'rows') x where x->>'id'=c::text and x->>'participant_id'=q::text and x->>'chapters'='9' and x->>'revision_id'=rev::text);
+ execute 'reset role';
+ assert (select sum(points) from rooted.ledger where participant_id=q)=16,'historical rates survive off/on';
+ assert (select sum(points) from rooted.ledger where participant_id=p and kind in ('reading','reading_correction'))=15;
+ -- Kiosk projection, future checkin, secure display and present-only draw.
+ insert into rooted.devices(id,event_id,token_hash,label,issued_by,expires_at) values(gen_random_uuid(),e,extensions.digest(token,'sha256'),'Correction kiosk',a,now()+interval '1 hour') returning id into dev;
+ execute 'set local role service_role';
+ v:=public.rooted_kiosk(token,'person',jsonb_build_object('participant_id',q));
+ assert (v->>'already_checked_in')::boolean and (v->>'prior_chapters')::integer=9;
+ v:=public.rooted_kiosk(token,'checkin',jsonb_build_object('participant_id',q,'bible',true,'chapters',9),gen_random_uuid());
+ assert (v#>>'{result,duplicate}')::boolean;
+ execute 'reset role';
+ update rooted.devices set event_id=e3 where id=dev;
+ execute 'set local role service_role';
+ v:=public.rooted_kiosk(token,'checkin',jsonb_build_object('participant_id',q,'bible',false,'chapters',10),gen_random_uuid());
+ assert (v#>>'{result,receipt,earned_points}')::integer=20,'future kiosk delta 1';
+ execute 'reset role';
+ -- Only q present in e3; original p must not enter its draw.
+ execute 'set local role authenticated';
+ v:=public.rooted_leader_mutate(gen_random_uuid(),'draw',jsonb_build_object('event_id',e3,'prize','Test','present_only',true,'one_win',false));
+ assert v#>>'{result,winner_id}'=q::text;
+ r:=public.rooted_correct_checkin(gen_random_uuid(),c,rev,q,true,true,2); rev:=(r#>>'{result,revision_id}')::uuid;
+ execute 'reset role';
+ assert (select sum(points) from rooted.ledger where participant_id=q and kind in ('reading','reading_correction'))=10,'other destination report retains cumulative max';
+ execute 'set local role authenticated';
+ -- Projections after transferring the only check-in in e2: no stale original presence.
+ execute 'set local role authenticated';
+ v:=public.rooted_correct_checkin(gen_random_uuid(),c2,null,inviter,true,false,12);
+ v:=public.rooted_leader_mutate(gen_random_uuid(),'draw',jsonb_build_object('event_id',e2,'prize','Transfer test','present_only',true,'one_win',false));
+ assert v#>>'{result,winner_id}'=inviter::text,'draw uses transferred person';
+ execute 'reset role';
+ insert into rooted.stations(event_id,label,token_hash,authorized_by,expires_at)
+ values(e2,'Correction display',extensions.digest(repeat('c',64),'sha256'),a,clock_timestamp()+interval '1 day') returning id into station;
+ update rooted.devices set event_id=e2,station_id=station where id=dev;
+ execute 'set local role service_role';
+ v:=public.rooted_display(token);
+ assert v->>'attendance_count'='1';
+ assert exists(select 1 from jsonb_array_elements(v->'participants') x where x->>'id'=inviter::text and (x->>'present')::boolean);
+ assert exists(select 1 from jsonb_array_elements(v->'participants') x where x->>'id'=p::text and not (x->>'present')::boolean),'display source not present';
+ v:=public.rooted_kiosk(token,'person',jsonb_build_object('participant_id',p));
+ assert not (v->>'already_checked_in')::boolean,'kiosk source not checked in';
+ execute 'reset role';
+ -- Actual referral claims fail closed; chapters/Bible remain editable.
+ execute 'set local role authenticated';
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'checkin',jsonb_build_object('participant_id',guest,'event_id',e3,'attended',true,'bible',true,'chapters',4,'inviter_id',inviter)); gc:=(r#>>'{result,receipt,checkin_id}')::uuid;
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),gc,null,guest,false,false,0); raise exception 'referral corruption'; exception when object_not_in_prerequisite_state then null; end;
+ begin perform public.rooted_correct_checkin(gen_random_uuid(),gc,null,inviter,true,true,4); raise exception 'referral transfer'; exception when object_not_in_prerequisite_state then null; end;
+ r:=public.rooted_correct_checkin(gen_random_uuid(),gc,null,guest,true,false,2);
+ perform set_config('request.jwt.claim.sub',outsider::text,true);
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,5); raise exception 'outsider'; exception when insufficient_privilege then null; end;
+ perform set_config('request.jwt.claim.sub','',true);
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,5); raise exception 'signed out'; exception when insufficient_privilege then null; end;
+ execute 'reset role';
+ update rooted.leaders set active=false where user_id=a;
+ perform set_config('request.jwt.claim.sub',a::text,true);
+ execute 'set local role authenticated';
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,5); raise exception 'revoked replay'; exception when insufficient_privilege then null; end;
+ begin perform count(*) from rooted.checkin_revisions; raise exception 'private read'; exception when insufficient_privilege then null; end;
+ execute 'set local role anon';
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,5); raise exception 'anon'; exception when insufficient_privilege then null; end;
+ execute 'set local role service_role';
+ begin perform public.rooted_correct_checkin(req,c,null,q,true,true,5); raise exception 'service'; exception when insufficient_privilege then null; end;
+ execute 'reset role';
+ begin update rooted.checkin_revisions set chapters=1 where checkin_id=c; raise exception 'mutable'; exception when object_not_in_prerequisite_state then null; end;
+ begin truncate rooted.checkin_revisions; raise exception 'truncate'; exception when object_not_in_prerequisite_state then null; end;
+ assert (select count(*) from rooted.checkin_revisions where request_id=req)=1;
+ assert (select count(*) from rooted.audit where request_id=req)=1;
+ raise notice 'PASS full correction: transfer/back/later, duplicates, weekly max, attendance/Bible/rates, manual preservation, stale/retry, referral fail-safe, kiosk/draw, ACL, immutable history';
+end $$;
+set constraints all immediate;
+rollback;

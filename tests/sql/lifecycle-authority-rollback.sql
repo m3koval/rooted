@@ -1,0 +1,60 @@
+-- Run only in disposable local database after complete chain.
+begin;
+insert into auth.users(id,email) values ('93000000-0000-4000-8000-000000000001','admin@example.test'),('93000000-0000-4000-8000-000000000002','leader@example.test');
+insert into rooted.leaders(user_id,display_name,role) values ('93000000-0000-4000-8000-000000000001','Admin','admin'),('93000000-0000-4000-8000-000000000002','Leader','leader');
+do $$
+declare sid uuid; e1 uuid; e2 uuid; station uuid; station_token text; token1 text; token2 text; token3 text; r jsonb; a text; q uuid:=gen_random_uuid(); payload jsonb; invitation uuid;
+begin
+ perform set_config('request.jwt.claim.sub','93000000-0000-4000-8000-000000000001',true);
+ perform set_config('role','authenticated',true);
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'season.create','{"name":"Test","starts_on":"2026-01-01","ends_on":"2026-12-31"}');sid:=(r->'result'->>'id')::uuid;
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'event.create',jsonb_build_object('season_id',sid,'name','Week 1','date','2026-09-26','reading_week','2026-09-21'));e1:=(r->'result'->>'id')::uuid;
+ r:=public.rooted_leader_mutate(gen_random_uuid(),'event.create',jsonb_build_object('season_id',sid,'name','Week 2','date','2026-10-03','reading_week','2026-09-28'));e2:=(r->'result'->>'id')::uuid;
+ perform public.rooted_set_checkin_pin('012345');
+ r:=public.rooted_station_manage('station.enroll',jsonb_build_object('event_id',e1,'label','Tablet'));station:=(r->'station'->>'id')::uuid;station_token:=r->'station'->>'token';
+ perform set_config('role','service_role',true);
+ r:=public.rooted_station_unlock(station_token,'012345');token1:=r->>'device_token';
+ if token1 is null then raise exception 'unlock failed';end if;
+ perform public.rooted_kiosk(token1,'context');
+ perform set_config('role','authenticated',true);
+ r:=public.rooted_station_transfer(q,station,e2,'Weekly transfer');
+ if (r->'result'->>'revoked_sessions')::int<>1 then raise exception 'transfer did not revoke';end if;
+ if r is distinct from public.rooted_station_transfer(q,station,e2,'Weekly transfer') then raise exception 'transfer replay';end if;
+ perform set_config('role','service_role',true);
+ begin perform public.rooted_kiosk(token1,'checkin','{}',gen_random_uuid());raise exception 'old intent allowed';exception when insufficient_privilege then null;end;
+ r:=public.rooted_station_unlock(station_token,'012345');token2:=r->>'device_token';
+ if r->>'event_id'<>e2::text then raise exception 'wrong target';end if;
+ perform set_config('role','authenticated',true);
+ payload:=jsonb_build_object('event_id',e2,'open',false);q:=gen_random_uuid();
+ perform public.rooted_leader_mutate(q,'event.open',payload);
+ perform public.rooted_leader_mutate(gen_random_uuid(),'event.open',jsonb_build_object('event_id',e2,'open',true));
+ perform set_config('role','service_role',true);
+ begin perform public.rooted_kiosk(token2,'context');raise exception 'reopen restored old authority';exception when insufficient_privilege then null;end;
+ r:=public.rooted_station_unlock(station_token,'012345');token3:=r->>'device_token';
+ perform set_config('role','authenticated',true);
+ perform public.rooted_leader_mutate(q,'event.open',payload);
+ perform set_config('role','service_role',true);
+ perform public.rooted_kiosk(token3,'context'); -- old close replay must not revoke new session
+ perform set_config('role','authenticated',true);
+ perform public.rooted_leader_mutate(gen_random_uuid(),'season.active',jsonb_build_object('season_id',sid,'active',false));
+ perform public.rooted_leader_mutate(gen_random_uuid(),'season.active',jsonb_build_object('season_id',sid,'active',true));
+ perform set_config('role','service_role',true);
+ begin perform public.rooted_kiosk(token3,'context');raise exception 'reactivation restored authority';exception when insufficient_privilege then null;end;
+ perform set_config('role','authenticated',true);
+ begin perform public.rooted_team_mutate(gen_random_uuid(),'invite','{"email":"admin@example.test","display_name":"Existing"}');raise exception 'existing email accepted';exception when unique_violation then null;end;
+ r:=public.rooted_team_mutate(gen_random_uuid(),'invite','{"email":"new@example.test","display_name":"New"}');invitation:=(r->'result'->>'id')::uuid;
+ begin perform public.rooted_team_provision('93000000-0000-4000-8000-000000000001',invitation,'get');raise exception 'browser provision bypass';exception when insufficient_privilege then null;end;
+ perform set_config('request.jwt.claim.sub','93000000-0000-4000-8000-000000000002',true);
+ foreach a in array array['season.create','season.active','event.create','event.open'] loop
+  begin perform public.rooted_leader_mutate(gen_random_uuid(),a,'{}');raise exception 'leader lifecycle allowed: %',a;exception when insufficient_privilege then null;end;
+ end loop;
+ begin perform public.rooted_station_transfer(gen_random_uuid(),station,e1,'Not admin');raise exception 'leader transfer allowed';exception when insufficient_privilege then null;end;
+ perform set_config('role','none',true);
+ update rooted.leaders set role='leader' where user_id='93000000-0000-4000-8000-000000000001';
+ perform set_config('request.jwt.claim.sub','93000000-0000-4000-8000-000000000001',true);
+ perform set_config('role','authenticated',true);
+ begin perform public.rooted_leader_mutate(q,'event.open',payload);raise exception 'demoted replay allowed';exception when insufficient_privilege then null;end;
+ perform set_config('role','none',true);
+ if not exists(select 1 from rooted.audit where action='station.transfer') then raise exception 'missing transfer audit';end if;
+end $$;
+rollback;
