@@ -7,6 +7,62 @@ if (location.hash || location.search) history.replaceState(null, '', location.pa
 if (invalidEnrollment) enrollment = '';
 const $ = id => document.getElementById(id);
 const pinControl = enhancePin($('pin'));
+// The visual viewport shrinks when a software keyboard is open on iPadOS.
+function fitViewport() {
+  const viewport = window.visualViewport;
+  document.documentElement.style.setProperty('--app-height', `${viewport?.height || innerHeight}px`);
+  document.documentElement.style.setProperty('--app-top', `${viewport?.offsetTop || 0}px`);
+}
+window.visualViewport?.addEventListener('resize', fitViewport);
+window.visualViewport?.addEventListener('scroll', fitViewport);
+window.addEventListener('resize', fitViewport); fitViewport();
+function progress(step) {
+  for (const item of document.querySelectorAll('[data-step]')) {
+    if (item.dataset.step === step) item.setAttribute('aria-current', 'step');
+    else item.removeAttribute('aria-current');
+  }
+}
+let keypadDraft = '';
+function closeKeypad() {
+  $('chapter-keypad').hidden = true; $('more-chapters').setAttribute('aria-expanded', 'false');
+}
+function updateChapterControls() {
+  const value = $('chapters').value;
+  $('submit-checkin').disabled = busy || value === '' || !$('chapter-keypad').hidden;
+  for (const button of document.querySelectorAll('[data-chapters]')) button.setAttribute('aria-pressed', String(value !== '' && button.dataset.chapters === value));
+  $('chapter-selection').textContent = value === '' ? 'Choose a number to continue.' : `${value} ${value === '1' ? 'chapter' : 'chapters'} selected`;
+  const validDraft = keypadDraft !== '' && Number(keypadDraft) <= 100000;
+  $('keypad-done').disabled = busy || !validDraft;
+  $('keypad-error').textContent = keypadDraft !== '' && !validDraft ? 'Choose a total from 0 to 100000.' : '';
+}
+function chooseChapters(value) {
+  $('chapters').value = value; closeKeypad(); updateChapterControls(); status();
+}
+function editKeypad(key) {
+  if (busy) return;
+  if (key === 'Backspace') keypadDraft = keypadDraft.slice(0, -1);
+  else if (key === 'Clear') keypadDraft = '';
+  else if (/^[0-9]$/.test(key) && keypadDraft.length < 7) keypadDraft = (keypadDraft + key).replace(/^0+(?=\d)/, '');
+  $('keypad-value').textContent = keypadDraft || '—'; updateChapterControls();
+}
+for (const button of document.querySelectorAll('[data-chapters]')) button.addEventListener('click', () => { if (!busy) chooseChapters(button.dataset.chapters); });
+$('more-chapters').addEventListener('click', () => {
+  if (busy) return;
+  $('chapters').value = '';
+  keypadDraft = ''; $('chapter-keypad').hidden = false; $('more-chapters').setAttribute('aria-expanded', 'true'); editKeypad('Clear');
+  $('chapter-keypad').querySelector('button').focus({preventScroll:true});
+  if (innerWidth <= 600) $('chapter-keypad').scrollIntoView({block:'nearest'});
+});
+for (const button of document.querySelectorAll('[data-digit]')) button.addEventListener('click', () => editKeypad(button.dataset.digit));
+$('keypad-clear').addEventListener('click', () => editKeypad('Clear'));
+$('keypad-backspace').addEventListener('click', () => editKeypad('Backspace'));
+$('keypad-done').addEventListener('click', () => { if (!$('keypad-done').disabled) { chooseChapters(keypadDraft); $('more-chapters').focus({preventScroll:true}); } });
+$('chapters-step').addEventListener('keydown', e => {
+  if ($('chapter-keypad').hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^[0-9]$/.test(e.key) || e.key === 'Backspace') { e.preventDefault(); editKeypad(e.key); }
+  else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.preventDefault(); $('keypad-done').click(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeKeypad(); updateChapterControls(); $('more-chapters').focus(); }
+});
 const TOKEN_KEY = 'rooted.kiosk.device.v1';
 const PENDING_KEY = 'rooted.kiosk.pending.v1';
 const STATION_KEY = 'rooted.kiosk.station.v1';
@@ -30,7 +86,7 @@ function expireSession() {
 function receiptCountdown() {
   clearTimeout(receiptTimer);
   if ($('receipt-screen').hidden || pending || receiptPaused) return;
-  receiptTimer = setTimeout(() => { if (!pending && !receiptPaused && !$('receipt-screen').hidden) reset(); }, 3000);
+  receiptTimer = setTimeout(() => { if (!pending && !receiptPaused && !$('receipt-screen').hidden) reset(); }, 8000);
 }
 function leaderSession() {
   try { return [localStorage, sessionStorage].some(store => Object.keys(store).some(k => /^sb-.+-auth-token(?:\.\d+)?$/.test(k))); }
@@ -62,39 +118,44 @@ function cancelSearch() {
   $('matches').replaceChildren(); $('matches').setAttribute('aria-busy', 'false');
 }
 function bibleStep() {
-  $('bible-step').hidden = false; $('chapters-step').hidden = true;
+  $('bible-step').hidden = false; $('chapters-step').hidden = true; closeKeypad(); progress('bible');
   $('bible-yes').setAttribute('aria-pressed', String(bibleAnswer === true));
   $('bible-no').setAttribute('aria-pressed', String(bibleAnswer === false));
 }
 const screens = ['activation', 'search-screen', 'person-screen', 'pending-screen', 'receipt-screen'];
 function status(message = '') { $('status').textContent = message; }
 function screen(id) {
+  $('staff-tools').open = false;
   for (const name of screens) $(name).hidden = name !== id;
+  progress(id === 'receipt-screen' ? 'saved' : id === 'person-screen' ? ($('chapters-step').hidden ? 'bible' : 'chapters') : id === 'pending-screen' ? 'chapters' : 'name');
   $('lock').hidden = !token;
   $('lock').disabled = false; pairedUI();
   clearTimeout(idle);
   clearTimeout(receiptTimer);
   if (!pending && ['person-screen', 'search-screen'].includes(id)) idle = setTimeout(reset, IDLE_MS);
-  if (id === 'receipt-screen') receiptCountdown();
+  if (id === 'receipt-screen') { idle = setTimeout(reset, IDLE_MS); receiptCountdown(); }
 }
 function reset() {
   if (pending || busy) return;
   receiptPaused = false; clearTimeout(receiptTimer);
   cancelSearch(); bibleAnswer = null; bibleStep();
+  keypadDraft = ''; $('keypad-value').textContent = '—';
   pinControl.clear();
   selected = null; $('query').value = ''; $('matches').replaceChildren(); $('search-note').textContent = '';
   $('person-name').textContent = ''; $('points').textContent = ''; $('components').replaceChildren();
   $('receipt-id').textContent = ''; $('receipt-note').textContent = ''; $('bible').checked = false;
   $('pending-id').textContent = ''; $('bible-summary').textContent = '';
-  $('keep-open').textContent = 'Keep open'; $('keep-open').setAttribute('aria-pressed', 'false');
+  $('keep-open').textContent = 'More time'; $('keep-open').setAttribute('aria-pressed', 'false');
   $('chapters').value = ''; $('week').textContent = ''; $('person-note').textContent = '';
   status(); screen(token && context ? 'search-screen' : 'activation');
-  if (token && context) $('query').focus();
+  updateChapterControls();
+  if (token && context) $('search-screen').querySelector('h1').focus({preventScroll:true});
 }
 function setBusy(value) {
   busy = value;
   for (const button of document.querySelectorAll('button')) button.disabled = value;
   $('lock').disabled = false;
+  updateChapterControls();
 }
 function message(e) {
   if (e.code === 'invalid_pin') return 'That PIN was not accepted. Ask a leader to try again.';
@@ -105,7 +166,7 @@ function message(e) {
   if (e.code === 'leader_required_or_expired' || e.code === 'forbidden') return 'Ask a leader for help. This device may be expired, revoked, or need leader approval.';
   if (e.code === 'checkin_conflict') return 'A different check-in may already exist. Ask a leader to verify the record.';
   if (e.code === 'invalid_request') return 'This check-in could not be accepted. Ask a leader to help.';
-  return 'No server confirmation received. Check the connection and retry; no offline points are awarded.';
+  return 'We couldn’t confirm that. Try again, or ask a leader for help.';
 }
 async function api(action, payload = {}, requestId, signal) {
   if (leaderSession()) { await lockStation(); throw Object.assign(new Error('Leader browser'), { stale: true }); }
@@ -131,19 +192,19 @@ async function api(action, payload = {}, requestId, signal) {
   return data;
 }
 function showPending() {
-  $('pending-id').textContent = `Request: ${pending.request_id}`;
+  $('pending-id').textContent = '';
   screen('pending-screen');
 }
 function showReceipt(receipt, duplicate = false) {
   if (!receipt || !uuid.test(receipt.checkin_id) || !Number.isSafeInteger(receipt.earned_points) || !Array.isArray(receipt.components) || !receipt.components.every(c => c && typeof c.label === 'string' && Number.isSafeInteger(c.points))) throw new Error('Missing receipt');
   receiptPaused = false;
-  $('keep-open').textContent = 'Keep open'; $('keep-open').setAttribute('aria-pressed', 'false');
-  $('return-note').textContent = 'Returns to name search after 3 seconds without interaction. Choose Keep open for more reading time.';
+  $('keep-open').textContent = 'More time'; $('keep-open').setAttribute('aria-pressed', 'false');
+  $('return-note').textContent = 'Ready for the next person in 8 seconds. Need longer? Tap More time.';
   $('points').textContent = String(receipt.earned_points);
-  $('receipt-screen').querySelector('h1').textContent = duplicate ? 'Already checked in.' : "You're here. Let's grow.";
-  $('receipt-note').textContent = duplicate ? 'You were already checked in. These are the points from your saved receipt, not additional points.' : 'Your check-in is saved. These points come from your server receipt.';
+  $('receipt-screen').querySelector('h1').textContent = duplicate ? 'Already checked in.' : 'You’re checked in!';
+  $('receipt-note').textContent = duplicate ? 'You’re all set. No extra points were added.' : 'All done. Enjoy the gathering!';
   $('components').replaceChildren(...receipt.components.map(c => { const li = document.createElement('li'); li.textContent = `${c.label}: ${c.points}`; return li; }));
-  $('receipt-id').textContent = `Receipt: ${receipt.checkin_id}`;
+  $('receipt-id').textContent = '';
   screen('receipt-screen');
   $('receipt-screen').querySelector('h1').focus();
 }
@@ -210,7 +271,7 @@ $('search-form').addEventListener('submit', e => e.preventDefault());
 $('query').addEventListener('input', () => {
   cancelSearch(); status();
   const query = $('query').value.trim();
-  $('search-note').textContent = query.length < 2 ? 'Type at least two letters to see matching names.' : 'Finding matching names…';
+  $('search-note').textContent = query.length < 2 ? 'Type at least 2 letters of your name.' : 'Looking for your name…';
   if (query.length < 2 || busy || !token || $('search-screen').hidden) return;
   const version = searchVersion;
   searchTimer = setTimeout(() => searchNames(query, version), 300);
@@ -227,23 +288,23 @@ async function searchNames(query, version) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'person-option'; button.textContent = p.name;
       button.addEventListener('click', () => selectPerson(p.id)); return button;
     }));
-    $('search-note').textContent = data.truncated ? 'More names match. Type more of your name to narrow the search.' : data.matches.length ? 'Choose your name. If names are the same, ask a leader.' : 'No match found. Ask a leader to help.';
+    $('search-note').textContent = data.truncated ? 'Type a little more of your name.' : data.matches.length ? 'Tap your name. See the same name twice? Ask a leader.' : 'No match found. Ask a leader to help.';
   } catch (err) { if (version === searchVersion && !err.stale && !controller.signal.aborted) $('search-note').textContent = message(err); }
   finally { if (version === searchVersion) { searchController = null; $('matches').setAttribute('aria-busy', 'false'); } }
 }
 async function selectPerson(id) {
-  if (busy) return; cancelSearch(); setBusy(true); status('Checking your record…');
+  if (busy) return; $('query').blur(); cancelSearch(); setBusy(true); status('Checking your record…');
   try {
     const data = await api('person', { participant_id: id });
     if (!data.person || data.person.id !== id || typeof data.needs_leader !== 'boolean' || typeof data.already_checked_in !== 'boolean') throw new Error('Invalid person');
     if (data.already_checked_in) { showReceipt(data.receipt, true); status(); return; }
     selected = data.person; $('person-name').textContent = data.person.name;
-    $('person-note').textContent = data.needs_leader ? 'Welcome! A leader needs to help with your first check-in. Please ask them before continuing.' : 'Two quick questions, then confirm your check-in.';
+    $('person-note').textContent = data.needs_leader ? 'Welcome! Ask a leader to help with your first check-in.' : '';
     $('checkin-form').hidden = data.needs_leader;
-    $('chapters').value = String(data.prior_chapters);
+    $('chapters').value = ''; updateChapterControls();
     $('bible').checked = false;
     bibleAnswer = null; bibleStep();
-    $('week').textContent = `Week beginning ${context.event.reading_week} · Already recorded: ${data.prior_chapters} chapters`;
+    $('week').textContent = `Week of ${new Intl.DateTimeFormat('en-US', {month:'short',day:'numeric',timeZone:'UTC'}).format(new Date(context.event.reading_week+'T12:00:00Z'))}`;
     screen('person-screen'); status(); if (!data.needs_leader) $('bible-question').focus();
   } catch (e) { if (!e.stale) status(message(e)); }
   finally { setBusy(false); }
@@ -253,25 +314,25 @@ for (const [id, answer] of [['bible-yes', true], ['bible-no', false]]) $(id).add
   bibleAnswer = answer; $('bible').checked = answer; bibleStep();
   $('bible-step').hidden = true; $('chapters-step').hidden = false;
   $('bible-summary').textContent = answer ? 'Bible: Yes, I brought it.' : 'Bible: No, not today.';
-  status(); $('chapters').focus();
+  progress('chapters'); updateChapterControls(); status(); $('chapters-question').focus({preventScroll:true});
 });
-$('back-bible').addEventListener('click', () => { if (!busy) { bibleStep(); status(); $('bible-question').focus(); } });
+
 $('checkin-form').addEventListener('submit', e => {
   e.preventDefault(); if (busy || pending || !selected || bibleAnswer === null || $('chapters-step').hidden || $('checkin-form').hidden) return;
   const chapters = Number($('chapters').value);
-  if ($('chapters').value === '' || !Number.isInteger(chapters) || chapters < 0 || chapters > 100000) return status('Enter a whole number from 0 to 100000.');
+  if (!$('chapter-keypad').hidden || $('chapters').value === '' || !Number.isInteger(chapters) || chapters < 0 || chapters > 100000) return status('Enter a whole number from 0 to 100000.');
   const intent = { event_id: context.event.id, request_id: crypto.randomUUID(), payload: { participant_id: selected.id, bible: $('bible').checked, chapters } };
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(intent)); }
   catch { return status('This browser cannot safely retain a retry. Ask a leader; nothing was submitted.'); }
   pending = intent; submitPending();
 });
 $('retry').addEventListener('click', submitPending);
-$('back').addEventListener('click', reset); $('next').addEventListener('click', reset);
+$('back').addEventListener('click', () => { if (busy || pending) return; if (!$('chapters-step').hidden) { bibleStep(); status(); $('bible-question').focus(); } else reset(); }); $('next').addEventListener('click', reset);
 $('keep-open').addEventListener('click', () => {
   receiptPaused = !receiptPaused;
   $('keep-open').setAttribute('aria-pressed', String(receiptPaused));
-  $('keep-open').textContent = receiptPaused ? 'Resume auto-return' : 'Keep open';
-  $('return-note').textContent = receiptPaused ? 'Auto-return paused. Choose Done when you are ready.' : 'Returns to name search after 3 seconds without interaction.';
+  $('keep-open').textContent = receiptPaused ? 'More time ✓' : 'More time';
+  $('return-note').textContent = receiptPaused ? 'Take your time. Tap Next person when you’re ready.' : 'Ready for the next person in 8 seconds.';
   receiptCountdown();
 });
 async function lockStation(forget = false) {
@@ -294,7 +355,7 @@ function activity() {
   if (leaderSession()) { lockStation(); return; }
   if (Date.now() >= expiresAt) { expireSession(); return; }
   if (!$('receipt-screen').hidden) receiptCountdown();
-  else if (!pending) { clearTimeout(idle); idle = setTimeout(reset, IDLE_MS); }
+  if (!pending) { clearTimeout(idle); idle = setTimeout(reset, IDLE_MS); }
 }
 for (const name of ['pointerdown', 'keydown']) document.addEventListener(name, activity, { capture: true });
 setInterval(() => { if (token && leaderSession()) lockStation(); else if (token && Date.now() >= expiresAt) expireSession(); }, 1000);

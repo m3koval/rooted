@@ -1,5 +1,6 @@
 // Real Chromium, fictional values and intercepted APIs only; no hosted writes.
-import { chromium } from '@playwright/test';
+import {chromium} from '@playwright/test';
+import {leaderRoute} from './leader-navigation.mjs';
 import { createServer } from 'vite';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { PROJECT_URL } from '../src/core.js';
 const server = await createServer({server:{host:'localhost',port:0},define:{'import.meta.env.VITE_SUPABASE_URL':JSON.stringify(PROJECT_URL),'import.meta.env.VITE_SUPABASE_ANON_KEY':JSON.stringify('sb_publishable_mock_only')}});
 await server.listen();
 const origin=`http://localhost:${server.httpServer.address().port}`;
-const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
+const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-renderer-accessibility']});
 let checks=0;const ok=(value,label)=>{assert.ok(value,label);checks++;};
 const artifacts='/tmp/rooted-pin-qa';await mkdir(artifacts,{recursive:true});
 try {
@@ -50,7 +51,7 @@ try {
  await page.getByRole('button',{name:'Unlock station'}).click();await page.getByText('That PIN was not accepted.',{exact:false}).waitFor();ok(unlocks===1,'one deliberate unlock');ok(await pin.inputValue()==='','unlock clears native input');ok((await page.locator('.pin-cells').innerText()).trim()==='','unlock clears dots');
  await pin.fill('1234567');await page.getByRole('button',{name:'Unlock station'}).click();ok(unlocks===1,'overlong input not silently truncated/submitted');
  await page.evaluate(()=>document.querySelector('#activate-form').reset());ok(await pin.inputValue()==='','form reset clears input');ok((await page.locator('.pin-cells').innerText()).trim()==='','form reset clears cells');
- await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.getByRole('button',{name:'My check-in PIN',exact:true}).click();
+ await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await leaderRoute(page,'pin');
  const first=page.getByLabel('New six-digit PIN'),confirm=page.getByLabel('Confirm PIN');
  ok(await page.locator('.pin-native').count()===2,'one native input per field');
  await first.focus();await page.keyboard.type('012345');await page.keyboard.press('Tab');ok(await confirm.evaluate(el=>el===document.activeElement),'single tab stop per PIN');await page.keyboard.type('123456');

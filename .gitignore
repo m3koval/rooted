@@ -24,3 +24,4 @@ tests/sql/daily-rollback.sql
 tests/sql/daily-rollback-output.json
 tests/sql/display-rollback.sql
 tests/sql/display-rollback-output.json
+.vercel

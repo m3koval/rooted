@@ -1,6 +1,7 @@
 // Isolated UI + real SDK/WebAuthn test. ALL backend responses are mocked.
 // No real Auth session, person, credential enrollment, or production writes.
 import {chromium} from '@playwright/test';
+import {leaderRoute} from './leader-navigation.mjs';
 import {createServer} from 'vite';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import {PROJECT_URL} from '../src/core.js';
 const server=await createServer({server:{host:'localhost',port:0},define:{'import.meta.env.VITE_SUPABASE_URL':JSON.stringify(PROJECT_URL),'import.meta.env.VITE_SUPABASE_ANON_KEY':JSON.stringify('sb_publishable_mock_only')}});
 await server.listen();
 const origin=`http://localhost:${server.httpServer.address().port}`;
-const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
+const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-renderer-accessibility']});
 let checks=0;const ok=(condition,label)=>{assert.ok(condition,label);checks++;};
 try {
  const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -38,12 +39,12 @@ try {
  await page.goto(origin+'/leaders.html');await page.getByRole('button',{name:'Sign in with passkey',exact:true}).waitFor();
  ok(await page.getByRole('button',{name:'Register passkey',exact:true}).count()===0,'no signed-out enrollment');
  await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();
- await page.getByRole('button',{name:'My passkeys',exact:true}).click();
+ await leaderRoute(page,'security');
  ok(await page.getByText(/Never register a leader passkey on a shared kiosk/).count()===1,'personal-device warning');
  page.on('dialog',d=>d.accept());await page.getByRole('button',{name:'Register passkey',exact:true}).click();await page.getByText('Passkey registered and verified.',{exact:false}).waitFor();ok(registerCalls===1,'registration verify called once');
- await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('button',{name:'Sign in with passkey',exact:true}).click();await page.getByRole('button',{name:'My passkeys',exact:true}).waitFor();ok(signInCalls===1,'discoverable sign-in returned through authority boot');
- await page.getByRole('button',{name:'My passkeys',exact:true}).click();await page.getByRole('button',{name:'Refresh my passkeys'}).click();await page.getByRole('button',{name:'Remove passkey'}).click();await page.getByText('Passkey removed; server list verified.').waitFor();ok(rows.length===0,'deletion readback');
- await page.getByRole('button',{name:'My check-in PIN',exact:true}).click();ok(await page.getByRole('button',{name:'Set my PIN'}).count()===1,'PIN workflow retained');
+ await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('button',{name:'Sign in with passkey',exact:true}).click();await page.getByRole('navigation',{name:'Workspace'}).waitFor();ok(signInCalls===1,'discoverable sign-in returned through authority boot');
+ await leaderRoute(page,'security');await page.getByRole('button',{name:'Refresh my passkeys'}).click();await page.getByRole('button',{name:'Remove passkey'}).click();await page.getByText('Passkey removed; server list verified.').waitFor();ok(rows.length===0,'deletion readback');
+ await leaderRoute(page,'pin');ok(await page.getByRole('button',{name:'Set my PIN'}).count()===1,'PIN workflow retained');
  await page.getByRole('button',{name:'Sign out',exact:true}).click();role='participant';const before=reads;await page.getByRole('button',{name:'Sign in with passkey',exact:true}).click();await page.getByRole('heading',{name:'Access not verified'}).waitFor();ok(reads===before,'unassigned passkey authentication cannot read private collections');ok(await page.getByRole('button',{name:'Register passkey',exact:true}).count()===0,'unassigned cannot enroll');
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.evaluate(()=>{navigator.credentials.get=async()=>{throw new DOMException('Cancelled','NotAllowedError');};});await page.getByRole('button',{name:'Sign in with passkey',exact:true}).click();await page.getByText(/cancelled or timed out/).waitFor();ok(await page.getByRole('button',{name:'Sign in →',exact:true}).isEnabled(),'cancellation restores password fallback');
  await page.addInitScript(()=>Object.defineProperty(window,'PublicKeyCredential',{value:undefined,configurable:true}));await page.reload();ok(await page.getByRole('button',{name:'Sign in with passkey',exact:true}).isDisabled(),'unsupported browser safely disabled');ok(await page.getByRole('button',{name:'Sign in →',exact:true}).isEnabled(),'unsupported browser retains password');

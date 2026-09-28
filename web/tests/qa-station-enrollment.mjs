@@ -1,12 +1,13 @@
 // Real Chromium; fictional secrets, intercepted APIs, no screenshots or hosted writes.
 import {chromium} from '@playwright/test';
+import {leaderRoute} from './leader-navigation.mjs';
 import {createServer} from 'vite';
 import assert from 'node:assert/strict';
 import jsQR from 'jsqr';
 import {PROJECT_URL} from '../src/core.js';
 const server=await createServer({server:{host:'localhost',port:0},define:{'import.meta.env.VITE_SUPABASE_URL':JSON.stringify(PROJECT_URL),'import.meta.env.VITE_SUPABASE_ANON_KEY':JSON.stringify('sb_publishable_mock_only')}});await server.listen();
 const origin=`http://localhost:${server.httpServer.address().port}`;
-const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-renderer-accessibility']});
 let checks=0;const ok=(v,label)=>{assert.ok(v,label);checks++;};
 try{
  const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -22,16 +23,16 @@ try{
  else if(url.pathname.endsWith('/rpc/rooted_station_manage'))data=r.request().postDataJSON().p_action==='station.enroll'?{ok:true,station:{id:'station-1',token:secret}}:{ok:true,stations:[{id:'station-1',label:'Fictional station',expires_at:'2026-10-01',revoked_at:null}]};
  else if(url.pathname.includes('/rest/v1/rpc/')){const body=r.request().postDataJSON();const kind=body.p_collection;data={rows:kind==='seasons'?[{id:'season-1',name:'Fictional season',active:true}]:kind==='events'?[{id:'event-1',season_id:'season-1',name:'Fictional gathering',date:'2026-09-25',reading_week:'2026-09-21',open:true}]:[]};}
  else return r.abort();return r.fulfill({json:data});});
- await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.getByRole('button',{name:'Manage',exact:true}).click();
+ await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.getByRole('combobox',{name:'Gathering',exact:true}).selectOption('event-1');await leaderRoute(page,'stations');
  const enroll=async()=>{await page.getByLabel('Station label').fill('Fictional station');await page.getByRole('button',{name:'Enroll station',exact:true}).click();await page.getByText('Ready to scan with the check-in device camera.',{exact:true}).waitFor();};
- await enroll();
+ await page.evaluate(()=>scrollTo(0,document.body.scrollHeight));await enroll();ok(await page.locator('.station-enrollment-dialog').evaluate(d=>d.open&&d.matches(':modal')),'enrollment opens modal without scrolling');
  const pixels=await page.locator('canvas').evaluate(c=>({width:c.width,height:c.height,data:[...c.getContext('2d').getImageData(0,0,c.width,c.height).data]}));
  ok(jsQR(new Uint8ClampedArray(pixels.data),pixels.width,pixels.height).data===`https://www.rooted3d.com/checkin#station=${secret}`,'real browser canvas decodes exact URL');
  ok(await page.evaluate(s=>![...Object.values(localStorage),...Object.values(sessionStorage)].some(v=>v.includes(s)),secret),'secret never stored');
- for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});ok(await page.locator('canvas').evaluate(c=>c.getBoundingClientRect().right<=innerWidth),'QR fits viewport');}
+ for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});for(const [width,height] of [[390,844],[768,1024],[1024,768]]){await page.setViewportSize({width,height});ok(await page.locator('canvas').evaluate(c=>{const r=c.getBoundingClientRect();return r.right<=innerWidth&&r.left>=0&&r.top>=0&&r.bottom<=innerHeight;}),'QR fully visible in viewport');if(process.env.QA_SCREENSHOTS)await page.screenshot({path:`/tmp/rooted-fixes/qr-${width}.png`});}}
  await page.evaluate(()=>{window.oldCanvas=document.querySelector('canvas');window.oldCode=document.querySelector('[name=station_token]');});
  await page.getByRole('button',{name:'Hide QR and enrollment code'}).click();ok(await page.evaluate(()=>oldCanvas.width===0&&oldCanvas.height===0&&oldCode.value===''),'hide wipes detached pixels and input');ok(await page.locator('canvas').count()===0,'hidden QR removed');
- await enroll();role='leader';await page.getByRole('button',{name:'↻ Refresh',exact:true}).click();await page.getByText('Shared records refreshed from the server.',{exact:true}).waitFor();ok(await page.locator('canvas').count()===0,'role downgrade wipes QR');
- role='admin';await page.getByRole('button',{name:'↻ Refresh',exact:true}).click();await page.getByRole('button',{name:'Manage',exact:true}).click();await enroll();await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('button',{name:'Sign in →',exact:true}).waitFor();ok(await page.locator('canvas').count()===0,'signout removes QR');
+ await enroll();await page.keyboard.press('Escape');ok(await page.locator('.station-enrollment-dialog').count()===0,'Escape closes QR');await enroll();role='leader';await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await page.locator('.station-enrollment-dialog').waitFor({state:'detached'});ok(await page.locator('canvas').count()===0,'role downgrade wipes QR');
+ role='admin';await page.getByRole('button',{name:'↻ Refresh',exact:true}).click();await leaderRoute(page,'stations');await enroll();await page.getByRole('button',{name:'Sign out',exact:true}).evaluate(b=>b.click());await page.getByRole('button',{name:'Sign in →',exact:true}).waitFor();ok(await page.locator('canvas').count()===0,'signout removes QR');
  ok(external===0,'no third-party requests');ok(errors.length===0,'no browser errors');console.log(JSON.stringify({passed:checks,fictionalFixturesOnly:true}));
 }finally{await browser.close();await server.close();}

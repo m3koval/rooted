@@ -9,6 +9,7 @@ const pin = enhancePin($('pin'));
 const STATION = 'rooted.kiosk.station.v1', DEVICE = 'rooted.display.device.v1', EXPIRY = 'rooted.display.expires.v1';
 const validCode = value => /^[a-f0-9]{64}$/.test(value || '');
 let station = '', token = '', expires = 0, generation = 0, busy = false, request = null, timer, expiryTimer, rows = [], page = 0;
+let autoPages = false, rotationTimer;
 const status = text => { $('status').textContent = text; };
 function leaderSession() {
   try { return [localStorage, sessionStorage].some(s => Object.keys(s).some(k => /^sb-.+-auth-token(?:\.\d+)?$/.test(k))); } catch { return true; }
@@ -22,6 +23,7 @@ function gate() {
 }
 function clear(message) {
   generation++; request?.abort(); request = null; clearTimeout(timer); clearTimeout(expiryTimer);
+  autoPages = false; clearTimeout(rotationTimer); updateRotationControl();
   token = ''; expires = 0; busy = false; rows = []; page = 0;
   $('chart').replaceChildren(); $('attendance').textContent = ''; $('event-label').textContent = ''; $('updated').textContent = ''; $('page-label').textContent = ''; $('empty').hidden = true;
   pin.clear(); $('station').value = '';
@@ -48,11 +50,25 @@ function scheduleExpiry() {
   clearTimeout(expiryTimer);
   expiryTimer = setTimeout(() => { if (Date.now() >= expires) clear('Daily access ended. Ask a leader to enter their PIN again.'); else scheduleExpiry(); }, Math.min(Math.max(expires - Date.now(), 0), 2147483647));
 }
+function updateRotationControl() {
+  $('auto-pages').textContent = autoPages ? 'Pause pages' : 'Auto pages';
+  $('auto-pages').setAttribute('aria-pressed', String(autoPages));
+}
+function scheduleRotation() {
+  clearTimeout(rotationTimer);
+  if (!autoPages || document.hidden || !token || rows.length <= 10) return;
+  rotationTimer = setTimeout(() => {
+    if (!autoPages || document.hidden || !allowed()) return;
+    page = (page + 1) % Math.ceil(rows.length / 10);
+    renderRows();
+  }, 10000);
+}
 function renderRows() {
   const pages = Math.max(1, Math.ceil(rows.length / 10)); page = Math.min(page, pages - 1);
   const maximum = rows[0]?.points || 0;
   $('chart').replaceChildren(...rows.slice(page * 10, page * 10 + 10).map(p => {
     const li = document.createElement('li'); li.className = 'row';
+    if (p.rank <= 3) li.dataset.medal = ['gold', 'silver', 'bronze'][p.rank - 1];
     const rank = document.createElement('span'); rank.className = 'rank'; rank.textContent = p.rank;
     const track = document.createElement('div'); track.className = 'track';
     const bar = document.createElement('span'); bar.className = 'bar'; bar.style.width = `${maximum > 0 ? Math.max(0, Math.min(100, p.points / maximum * 100)) : 0}%`; bar.setAttribute('aria-hidden', 'true');
@@ -65,6 +81,8 @@ function renderRows() {
   $('page-label').textContent = `Page ${page + 1} of ${pages}`;
   $('previous').disabled = page === 0; $('next').disabled = page >= pages - 1;
   $('empty').hidden = rows.length !== 0;
+  $('auto-pages').disabled = pages <= 1;
+  scheduleRotation();
 }
 function render(data) {
   if (!data.event || typeof data.event.name !== 'string' || typeof data.event.date !== 'string' || !Number.isSafeInteger(data.attendance_count) || data.attendance_count < 0 || !Number.isFinite(Date.parse(data.updated_at)) || !Array.isArray(data.participants) || !data.participants.every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && Number.isSafeInteger(p.points) && typeof p.present === 'boolean')) throw new Error('Invalid display response');
@@ -119,18 +137,19 @@ $('activate-form').addEventListener('submit', async e => {
 });
 $('lock').addEventListener('click', lock);
 $('forget').addEventListener('click', () => { lock(); try { localStorage.removeItem(STATION); station = ''; gate(); } catch { status('Screen cleared, but the station could not be forgotten in browser storage.'); } });
-$('previous').addEventListener('click', () => { if (token && allowed()) { page = Math.max(0, page - 1); renderRows(); } });
-$('next').addEventListener('click', () => { if (token && allowed()) { page++; renderRows(); } });
+$('auto-pages').addEventListener('click', () => { if (token && allowed()) { autoPages = !autoPages; updateRotationControl(); scheduleRotation(); } });
+$('previous').addEventListener('click', () => { if (token && allowed()) { autoPages = false; updateRotationControl(); page = Math.max(0, page - 1); renderRows(); } });
+$('next').addEventListener('click', () => { if (token && allowed()) { autoPages = false; updateRotationControl(); page++; renderRows(); } });
 $('fullscreen').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { status('Full screen is unavailable here. Use your browser or device’s screen-sharing controls.'); } });
 document.addEventListener('fullscreenchange', () => { $('fullscreen').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
-document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else if (token && allowed()) poll(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(timer); clearTimeout(rotationTimer); if (request) { generation++; request.abort(); request = null; busy = false; gate(); } } else if (token && allowed()) { poll(); scheduleRotation(); } });
 window.addEventListener('online', () => { if (token) poll(); });
 window.addEventListener('offline', () => { if (token) status('Offline — showing only the last confirmed update.'); });
 window.addEventListener('storage', () => {
   try { const saved = localStorage.getItem(STATION) || ''; if (saved !== station || leaderSession()) { clear('Browser access changed. Unlock again in a separate display profile.'); station = validCode(saved) ? saved : ''; } gate(); } catch { clear('Browser storage is unavailable.'); }
 });
 setInterval(() => { if ((token || busy) && leaderSession()) clear('Use a separate browser profile with no leader sign-in.'); else if (token && Date.now() >= expires) clear('Daily access ended. Ask a leader to enter their PIN again.'); }, 1000);
-window.addEventListener('pagehide', () => { generation++; request?.abort(); request = null; clearTimeout(timer); $('chart').replaceChildren(); rows = []; });
+window.addEventListener('pagehide', () => { generation++; request?.abort(); request = null; clearTimeout(timer); clearTimeout(rotationTimer); $('chart').replaceChildren(); rows = []; });
 window.addEventListener('pageshow', e => { if (e.persisted) { if (token && allowed()) poll(); else gate(); } });
 try {
   const saved = localStorage.getItem(STATION); station = validCode(saved) ? saved : '';

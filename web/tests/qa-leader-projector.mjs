@@ -1,5 +1,6 @@
 // Offline fixtures: never sends requests to a hosted service.
 import {chromium} from '@playwright/test';
+import {leaderRoute} from './leader-navigation.mjs';
 import {createServer} from 'vite';
 import assert from 'node:assert/strict';
 import {PROJECT_URL} from '../src/core.js';
@@ -20,9 +21,9 @@ try{for(const width of [1920,390]){
  else if(u.pathname.endsWith('/rpc/rooted_leader_state')){const c=r.request().postDataJSON().p_collection;calls.push(c);data={rows:c==='seasons'?[{id:'s',name:'Season',active:true}]:c==='events'?[{id:'e',season_id:'s',name:'Our gathering',date:'2026-09-25',open:true}]:c==='participants'?Array.from({length:19},(_,i)=>({id:'p'+i,name:i===0?'A very long fictional participant name that should never overflow the chart':'Person '+String(i).padStart(2,'0'),points:i<2?100:i===18?-15:100-i*5,guardian_contact:'PRIVATE_CONTACT_SENTINEL'})):c==='checkins'?[{event_id:'e',participant_id:'p0',attended:true}]:[]};}
  else throw Error('Unexpected '+u.pathname);await r.fulfill({json:data});});
  await page.clock.install();await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.locator('.shell').waitFor();
- const tab=async(id,label)=>width<760?page.getByRole('combobox',{name:'Workspace',exact:true}).selectOption(id):page.getByRole('navigation',{name:'Workspace'}).getByRole('button',{name:label,exact:true}).click();
+ const tab=async(id)=>leaderRoute(page,id);
  await tab('profiles','Private profiles');await page.getByRole('button',{name:'Load private profiles'}).click();await page.locator('.draw-record').waitFor();
- ok(await page.locator('option[value="projector"]').count()===1,'mobile option exists');await tab('projector','Projector');await page.waitForTimeout(100);
+ await tab('checkin');ok(await page.getByRole('button',{name:'Open Projector',exact:true}).count()===1,'projector is reachable from Tonight');await tab('projector','Projector');await page.waitForTimeout(100);
  ok(!(await page.locator('.projector-screen').innerHTML()).includes('PRIVATE_'),'allowlist drops contacts and identity');
  ok((await page.locator('.projector-rank').allTextContents()).slice(0,3).join(',')==='1,1,3','shared competition ranks');
  await page.getByRole('button',{name:'Present fullscreen'}).click();await page.waitForTimeout(100);
@@ -32,8 +33,9 @@ try{for(const width of [1920,390]){
  await page.screenshot({path:`/tmp/rooted-leader-projector-${width}.png`});
  const all=await page.locator('.projector-name').allTextContents();while(await page.getByRole('button',{name:'Next →',exact:true}).isEnabled()){await page.getByRole('button',{name:'Next →',exact:true}).click();all.push(...await page.locator('.projector-name').allTextContents());}ok(new Set(all).size===19,'all participants paginated');ok((await page.locator('.projector-points').allTextContents()).includes('-15 pts'),'signed negative points');
  await page.evaluate(()=>document.exitFullscreen?.().catch(()=>{}));ok(await page.locator('.shell').count()===0,'native fullscreen exit stays privacy safe');
+ await page.getByRole('button',{name:'Rotate pages',exact:true}).click();await page.clock.fastForward(10001);ok(await page.getByText('Page 1 of 3',{exact:true}).count()===1,'rotation wraps last page to first');await page.getByRole('button',{name:'Pause rotation',exact:true}).click();await page.clock.fastForward(10001);ok(await page.getByText('Page 1 of 3',{exact:true}).count()===1,'rotation pauses');
  calls=[];await page.clock.fastForward(15001);await page.waitForTimeout(200);ok(calls.includes('participants')&&calls.includes('checkins')&&!calls.includes('ledger'),'lightweight timer refresh');
  await page.getByRole('button',{name:'Exit presentation'}).click();ok(await page.locator('.shell').count()===1,'explicit exit restores nav');
- await tab('community','Community');ok(await page.getByRole('button',{name:'Open Projector'}).count()===1,'community internal CTA');calls=[];await page.clock.fastForward(30001);await page.waitForTimeout(100);ok(calls.length===0,'timer stops off tab');
+ await tab('community','Community');ok(await page.getByRole('button',{name:'Open Projector'}).count()===1,'community internal CTA');calls=[];await page.clock.fastForward(30001);await page.waitForTimeout(100);ok(calls.every(c=>c==='identity'),'only bounded authority verification runs off projector');
  await page.getByRole('button',{name:'Open Projector'}).click();await page.waitForTimeout(100);await page.getByRole('button',{name:'Present fullscreen'}).click();denied=true;await page.clock.fastForward(15001);await page.getByRole('heading',{name:'Presentation paused'}).waitFor();ok(await page.locator('.projector-row,.shell,input').count()===0,'auth expiry blanks rows and private login');await page.getByRole('button',{name:'Exit presentation'}).click();await page.getByLabel('Email address').waitFor();ok(await page.locator('.projector-row').count()===0,'no rows after revoked session');denied=false;await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.locator('.shell').waitFor();await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Email address').waitFor();ok(await page.locator('.projector-row,.shell').count()===0,'explicit signout clears rows');ok(errors.length===0,'no runtime errors: '+errors);await context.close();
 }console.log(JSON.stringify({passed:checks,viewports:['1920x1080','390x844'],screenshots:'/tmp/rooted-leader-projector-*.png'}));}finally{await browser.close();await server.close();}
