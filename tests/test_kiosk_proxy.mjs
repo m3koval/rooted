@@ -61,12 +61,14 @@ for (const [label, options, expected] of [
   assert.equal(r.status, expected); assert.equal(calls.length, 0);
 });
 test('strict UUID, chapter, payload and search validation', () => {
-  const valid = { action: 'checkin', request_id: id, payload: { participant_id: id, bible: true, chapters: 0 } };
+  const valid = { action: 'checkin', request_id: id, payload: { event_id: id, participant_id: id, bible: true, chapters: 0 } };
   assert.equal(validateBody(valid).p_request_id, id);
   for (const invalid of [
+    { ...valid, payload: {participant_id:id,bible:true,chapters:0} },
+    { ...valid, payload: {...valid.payload,event_id:'not-uuid'} },
     { ...valid, request_id: 'not-uuid' }, { ...valid, request_id: null },
     ...['3', true, -1, 1.2, 100001, null].map(chapters => ({ ...valid, payload: { ...valid.payload, chapters } })),
-    { ...valid, payload: { ...valid.payload, event_id: id } },
+    { ...valid, payload: { ...valid.payload, actor_id: id } },
     { ...valid, payload: { ...valid.payload, bible: 'true' } },
     { action: 'search', payload: { query: 'x'.repeat(81) } },
     { action: 'search', payload: { query: 'x\n' } },
@@ -75,7 +77,7 @@ test('strict UUID, chapter, payload and search validation', () => {
   ]) assert.throws(() => validateBody(invalid));
 });
 test('streamed body is parsed and checkin receipt is projected', async () => {
-  const body = { action: 'checkin', request_id: id, payload: { participant_id: id, bible: true, chapters: 3 } };
+  const body = { action: 'checkin', request_id: id, payload: { event_id: id, participant_id: id, bible: true, chapters: 3 } };
   const result = { action: 'kiosk.checkin', request_id: id, result: { duplicate: false, receipt: { ...receipt, secret: 'hidden' } }, secret: 'hidden' };
   const { handler, calls } = setup(result);
   const r = await invoke(handler, request({ raw: JSON.stringify(body) }));

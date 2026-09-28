@@ -41,7 +41,7 @@ async function readBody(req) {
 }
 
 // Only documented failure codes may cross the server boundary.
-const SAFE_ERRORS = new Set(['invalid_station', 'invalid_pin', 'locked', 'event_closed']);
+const SAFE_ERRORS = new Set(['invalid_station', 'invalid_pin', 'locked', 'event_closed', 'no_current_gathering', 'ambiguous_current_gathering']);
 function project(action, value) {
   if (!object(value) || typeof value.ok !== 'boolean') throw error(502, 'unavailable');
   if (!value.ok) return { ok: false, error: SAFE_ERRORS.has(value.error) ? value.error : 'unavailable', ...(SAFE_ERRORS.has(value.error) && Number.isInteger(value.retry_after_seconds) && value.retry_after_seconds >= 0 && value.retry_after_seconds <= 900 ? { retry_after_seconds: value.retry_after_seconds } : {}) };

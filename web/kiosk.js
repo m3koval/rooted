@@ -162,6 +162,9 @@ function message(e) {
   if (e.code === 'locked') return 'Too many attempts. Wait 15 minutes before trying again.';
   if (e.code === 'invalid_station') return 'This station is expired or revoked. Ask a leader for a new setup code.';
   if (e.code === 'event_closed') return 'Check-in for this event is closed. Ask a leader for help.';
+  if (e.code === 'no_current_gathering') return 'No gathering is available today. Rooted does not meet on the last Friday of the month. This station is still paired; try again on the next gathering date.';
+  if (e.code === 'ambiguous_current_gathering') return 'More than one gathering is available today. Ask an administrator to select this station’s gathering.';
+  if (e.code === 'pending_event_mismatch') return 'An unfinished check-in belongs to an earlier gathering. Ask a leader to verify that entry before clearing this station’s unfinished check-in. It will not be moved to today.';
   if (e.code === 'rate_limited') return 'Please wait one minute, then try again.';
   if (e.code === 'leader_required_or_expired' || e.code === 'forbidden') return 'Ask a leader for help. This device may be expired, revoked, or need leader approval.';
   if (e.code === 'checkin_conflict') return 'A different check-in may already exist. Ask a leader to verify the record.';
@@ -212,7 +215,8 @@ async function submitPending() {
   if (busy || !pending) return;
   showPending(); setBusy(true); status('Confirming with the server…');
   try {
-    const result = await api('checkin', pending.payload, pending.request_id);
+    if (!context || pending.event_id !== context.event.id) throw Object.assign(new Error('Pending event mismatch'), {code:'pending_event_mismatch'});
+    const result = await api('checkin', {...pending.payload, event_id:pending.event_id}, pending.request_id);
     if (result.action !== 'kiosk.checkin' || result.request_id !== pending.request_id || !result.result || typeof result.result.duplicate !== 'boolean') throw new Error('Missing receipt');
     // Render only a real receipt; clear the persisted retry only after validation.
     showReceipt(result.result.receipt, result.result.duplicate);
@@ -239,7 +243,7 @@ async function activate() {
     context = await api('context');
     if (!context.event || !uuid.test(context.event.id) || typeof context.event.name !== 'string') throw new Error('Invalid context');
     sessionStorage.setItem(TOKEN_KEY, token);
-    if (pending && pending.event_id !== context.event.id) throw new Error('Pending event mismatch');
+    if (pending && pending.event_id !== context.event.id) throw Object.assign(new Error('Pending event mismatch'), {code:'pending_event_mismatch'});
     $('event-label').textContent = `${context.event.name} · ${context.event.date}`;
     status(); if (pending) showPending(); else screen('search-screen');
   } catch (e) { if (!e.stale) { context = null; status(message(e)); screen('activation'); } }
