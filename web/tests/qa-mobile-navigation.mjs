@@ -27,7 +27,7 @@ try{
    else if(url.pathname.endsWith('/rpc/rooted_admin_profiles')){profileCalls++;data={rows:[{participant_id:'p1',parent_guardian_email:'PRIVATE_CARE@example.invalid'}]};}
    else{unexpected++;return r.abort();}return r.fulfill({json:data});
   });
-  await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.locator('.shell').waitFor();
+  await page.clock.install({time:new Date('2026-09-25T18:00:00Z')});await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.locator('.shell').waitFor();
   await page.getByRole('combobox',{name:'Gathering',exact:true}).selectOption('e1');
   ok(profileCalls===0,'profiles not loaded during boot');
   await page.getByRole('button',{name:'Here',exact:true}).click();ok(await page.locator('.roster .person-row').count()===1,'Here filter');
