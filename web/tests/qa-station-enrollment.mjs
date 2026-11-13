@@ -20,12 +20,14 @@ try{
  else if(url.pathname.endsWith('/user'))data=user;
  else if(url.pathname.endsWith('/logout'))return r.fulfill({status:204});
  else if(url.pathname.endsWith('/rpc/rooted_identity'))data={actor_id:user.id,role,display_name:'Fictional Admin'};
- else if(url.pathname.endsWith('/rpc/rooted_station_manage'))data=r.request().postDataJSON().p_action==='station.enroll'?{ok:true,station:{id:'station-1',token:secret}}:{ok:true,stations:[{id:'station-1',label:'Fictional station',expires_at:'2026-10-01',revoked_at:null}]};
+ else if(url.pathname.endsWith('/rpc/rooted_station_manage')){const body=r.request().postDataJSON();if(body.p_action==='station.enroll')ok(!('ttl_days' in body.p_payload),'enrollment sends no TTL');data=body.p_action==='station.enroll'?{ok:true,station:{id:'station-1',token:secret,expires_at:null}}:{ok:true,stations:[{id:'station-1',label:'Fictional station',expires_at:null,revoked_at:null}]};}
  else if(url.pathname.includes('/rest/v1/rpc/')){const body=r.request().postDataJSON();const kind=body.p_collection;data={rows:kind==='seasons'?[{id:'season-1',name:'Fictional season',active:true}]:kind==='events'?[{id:'event-1',season_id:'season-1',name:'Fictional gathering',date:'2026-09-25',reading_week:'2026-09-21',open:true}]:[]};}
  else return r.abort();return r.fulfill({json:data});});
  await page.goto(origin+'/leaders.html');await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fictional-password');await page.getByRole('button',{name:'Sign in →',exact:true}).click();await page.getByRole('combobox',{name:'Gathering',exact:true}).selectOption('event-1');await leaderRoute(page,'stations');
+ ok(await page.locator('[name=ttl_days]').count()===0,'no enrollment TTL control');
  const enroll=async()=>{await page.getByLabel('Station label').fill('Fictional station');await page.getByRole('button',{name:'Enroll station',exact:true}).click();await page.getByText('Ready to scan with the check-in device camera.',{exact:true}).waitFor();};
  await page.evaluate(()=>scrollTo(0,document.body.scrollHeight));await enroll();ok(await page.locator('.station-enrollment-dialog').evaluate(d=>d.open&&d.matches(':modal')),'enrollment opens modal without scrolling');
+ ok(await page.getByText('Paired · no expiration',{exact:true}).count()===1,'permanent status rendered');
  const pixels=await page.locator('canvas').evaluate(c=>({width:c.width,height:c.height,data:[...c.getContext('2d').getImageData(0,0,c.width,c.height).data]}));
  ok(jsQR(new Uint8ClampedArray(pixels.data),pixels.width,pixels.height).data===`https://www.rooted3d.com/checkin#station=${secret}`,'real browser canvas decodes exact URL');
  ok(await page.evaluate(s=>![...Object.values(localStorage),...Object.values(sessionStorage)].some(v=>v.includes(s)),secret),'secret never stored');

@@ -160,7 +160,7 @@ function setBusy(value) {
 function message(e) {
   if (e.code === 'invalid_pin') return 'That PIN was not accepted. Ask a leader to try again.';
   if (e.code === 'locked') return 'Too many attempts. Wait 15 minutes before trying again.';
-  if (e.code === 'invalid_station') return 'This station is expired or revoked. Ask a leader for a new setup code.';
+  if (e.code === 'invalid_station') return 'This station setup is not recognized or has been revoked. Ask an administrator to check its pairing.';
   if (e.code === 'event_closed') return 'Check-in for this event is closed. Ask a leader for help.';
   if (e.code === 'no_current_gathering') return 'No gathering is available today. Rooted does not meet on the last Friday of the month. This station is still paired; try again on the next gathering date.';
   if (e.code === 'ambiguous_current_gathering') return 'More than one gathering is available today. Ask an administrator to select this station’s gathering.';
